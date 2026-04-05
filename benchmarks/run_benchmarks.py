@@ -7,6 +7,7 @@ import os
 import time
 import argparse
 import sys
+import psutil
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from benchmarks.load_generator import run_load, send_request, PROMPTS
@@ -15,6 +16,18 @@ RESULTS_DIR = os.path.join(os.path.dirname(__file__), "results")
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
 BASE_URL = "http://localhost:8000"
+
+
+def get_memory_metrics():
+    """Capture CPU and memory utilization."""
+    process = psutil.Process()
+    mem = process.memory_info()
+    return {
+        "cpu_percent": psutil.cpu_percent(interval=1),
+        "memory_rss_mb": round(mem.rss / 1024 / 1024, 2),
+        "memory_vms_mb": round(mem.vms / 1024 / 1024, 2),
+        "system_memory_percent": psutil.virtual_memory().percent,
+    }
 
 
 async def clear_cache():
@@ -32,6 +45,8 @@ async def benchmark_single_vs_batched():
     """Compare latency: sequential single requests vs concurrent (batched)."""
     print("\n=== Benchmark 1: Single vs Batched Latency ===")
     await clear_cache()
+
+    mem_before = get_memory_metrics()
 
     async with aiohttp.ClientSession() as session:
         # Single requests — one at a time
@@ -58,14 +73,19 @@ async def benchmark_single_vs_batched():
         batched_latencies = [r["latency_ms"] for r in batched_results
                              if r["success"]]
 
+    mem_after = get_memory_metrics()
+
     result = {
         "single_avg_ms": sum(single_latencies) / len(single_latencies),
         "batched_avg_ms": sum(batched_latencies) / len(batched_latencies),
         "single_latencies": single_latencies,
         "batched_latencies": batched_latencies,
+        "memory_before": mem_before,
+        "memory_after": mem_after,
     }
     print(f"Single avg: {result['single_avg_ms']:.1f}ms")
     print(f"Batched avg: {result['batched_avg_ms']:.1f}ms")
+    print(f"Memory RSS: {mem_after['memory_rss_mb']}MB | CPU: {mem_after['cpu_percent']}%")
     return result
 
 
@@ -79,15 +99,15 @@ async def benchmark_cold_vs_warm_cache():
     async with aiohttp.ClientSession() as session:
         sem = asyncio.Semaphore(1)
         for prompt in PROMPTS:
-            # Cold: first time seeing this prompt
             results = []
             await send_request(session, prompt, results, sem)
             cold_latencies.append(results[0]["latency_ms"])
 
-            # Warm: same prompt, should be cached
             results2 = []
             await send_request(session, prompt, results2, sem)
             warm_latencies.append(results2[0]["latency_ms"])
+
+    mem = get_memory_metrics()
 
     result = {
         "cold_avg_ms": sum(cold_latencies) / len(cold_latencies),
@@ -95,23 +115,27 @@ async def benchmark_cold_vs_warm_cache():
         "cold_latencies": cold_latencies,
         "warm_latencies": warm_latencies,
         "speedup_factor": (sum(cold_latencies) / sum(warm_latencies)),
+        "memory_metrics": mem,
     }
     print(f"Cold avg: {result['cold_avg_ms']:.1f}ms")
     print(f"Warm avg: {result['warm_avg_ms']:.1f}ms")
     print(f"Speedup: {result['speedup_factor']:.1f}x")
+    print(f"Memory RSS: {mem['memory_rss_mb']}MB | CPU: {mem['cpu_percent']}%")
     return result
 
 
 async def benchmark_throughput():
-    """Test throughput at multiple load levels."""
+    """Test throughput at multiple load levels including high load."""
     print("\n=== Benchmark 3: Throughput at Multiple Load Levels ===")
-    load_levels = [5, 10, 20]
+    load_levels = [10, 50, 100]  # low, medium, high
     results = {}
 
     for rps in load_levels:
         print(f"\nTesting {rps} req/s for 20 seconds...")
         await clear_cache()
+        mem_before = get_memory_metrics()
         data = await run_load(rps, duration_seconds=20, repeat_ratio=0.3)
+        mem_after = get_memory_metrics()
         successes = [r for r in data if r["success"]]
         if successes:
             latencies = [r["latency_ms"] for r in successes]
@@ -122,10 +146,15 @@ async def benchmark_throughput():
                 "avg_latency_ms": sum(latencies) / len(latencies),
                 "p95_latency_ms": sorted(latencies)[int(0.95 * len(latencies))],
                 "cache_hit_rate": sum(1 for r in successes if r["cached"]) / len(successes),
+                "memory_rss_mb": mem_after["memory_rss_mb"],
+                "cpu_percent": mem_after["cpu_percent"],
+                "system_memory_percent": mem_after["system_memory_percent"],
             }
             print(f"  Avg latency: {results[rps]['avg_latency_ms']:.1f}ms | "
                   f"P95: {results[rps]['p95_latency_ms']:.1f}ms | "
-                  f"Hit rate: {results[rps]['cache_hit_rate']:.1%}")
+                  f"Hit rate: {results[rps]['cache_hit_rate']:.1%} | "
+                  f"Memory: {results[rps]['memory_rss_mb']}MB | "
+                  f"CPU: {results[rps]['cpu_percent']}%")
 
     return results
 
