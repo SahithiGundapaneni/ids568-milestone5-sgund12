@@ -5,8 +5,7 @@ MLOps Milestone 5: LLM Inference Optimization with Batching and Caching
 
 ### 1. Install dependencies
 ```bash
-pip install -r requirements.txt
-```
+pip3 install -r requirements.txt```
 
 ### 2. Start the server
 ```bash
@@ -25,14 +24,14 @@ curl -X POST http://localhost:8000/generate \
 
 With the server running in one terminal:
 ```bash
-python benchmarks/run_benchmarks.py
+python3 benchmarks/run_benchmarks.py
 ```
 
 Results are saved to `benchmarks/results/benchmark_results.json`.
 
 ## Generating Charts
 ```bash
-python analysis/visualizations/generate_charts.py
+python3 analysis/visualizations/generate_charts.py
 ```
 
 ## Configuration
