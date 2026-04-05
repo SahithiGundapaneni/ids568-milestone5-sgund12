@@ -9,7 +9,7 @@ from src.config import config
 def make_cache_key(prompt: str, max_new_tokens: int) -> str:
     """
     Hash the prompt + params into an anonymous key.
-    NEVER store user IDs or emails — only the content hash.
+    # NEVER store plaintext identifiers — only the content hash.
     """
     raw = f"{prompt}|max_tokens={max_new_tokens}"
     return hashlib.sha256(raw.encode()).hexdigest()
